@@ -6,102 +6,174 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
-type Applier struct {
-	RicePath string
-	Manifest *Manifest
-	DryRun   bool
+type Backup struct {
+	Path      string
+	Timestamp string
+	Files     map[string]string
 }
 
-func NewApplier(ricePath string, dryRun bool) (*Applier, error) {
-	m, err := LoadManifest(ricePath)
+func Apply(ricePath string, dryRun bool) error {
+	manifest, err := LoadManifest(ricePath)
+	if err != nil {
+		return err
+	}
+
+	if err := manifest.Validate(); err != nil {
+		return fmt.Errorf("invalid manifest: %w", err)
+	}
+
+	fmt.Printf("\n🍚 Applying rice: %s v%s\n", manifest.Name, manifest.Version)
+	if manifest.Description != "" {
+		fmt.Printf("   %s\n", manifest.Description)
+	}
+	fmt.Println()
+
+	if dryRun {
+		fmt.Println("⚠ DRY RUN - no changes will be made\n")
+	}
+
+	backup, err := backupCurrent(manifest, dryRun)
+	if err != nil {
+		return fmt.Errorf("backup failed: %w", err)
+	}
+
+	if err := applyDotfiles(ricePath, manifest, dryRun); err != nil {
+		fmt.Println("\n❌ Dotfiles failed! Restoring backup...")
+		restoreBackup(backup)
+		return fmt.Errorf("dotfiles: %w", err)
+	}
+
+	if err := installPackages(manifest, dryRun); err != nil {
+		fmt.Println("\n⚠ Package installation had errors (dotfiles still applied)")
+	}
+
+	if err := restartServices(manifest, dryRun); err != nil {
+		fmt.Println("\n⚠ Service restart had errors (dotfiles still applied)")
+	}
+
+	fmt.Printf("\n✅ Rice applied successfully!")
+	if !dryRun {
+		fmt.Printf(" Backup saved at: %s\n", backup.Path)
+	}
+	return nil
+}
+
+func backupCurrent(manifest *Manifest, dryRun bool) (*Backup, error) {
+	home, err := os.UserHomeDir()
 	if err != nil {
 		return nil, err
 	}
 
-	return &Applier{
-		RicePath: ricePath,
-		Manifest: m,
-		DryRun:   dryRun,
-	}, nil
-}
+	timestamp := time.Now().Format("20060102-150405")
+	backupDir := filepath.Join(home, ".local/share/ricebox/backups", timestamp)
 
-func (a *Applier) Apply() error {
-	fmt.Printf("🍚 Applying rice: %s v%s\n", a.Manifest.Name, a.Manifest.Version)
-	fmt.Printf("   %s\n\n", a.Manifest.Description)
-
-	if err := a.applyDotfiles(); err != nil {
-		return fmt.Errorf("dotfiles: %w", err)
+	b := &Backup{
+		Path:      backupDir,
+		Timestamp: timestamp,
+		Files:     make(map[string]string),
 	}
 
-	if err := a.installPackages(); err != nil {
-		return fmt.Errorf("packages: %w", err)
-	}
-
-	if err := a.restartServices(); err != nil {
-		return fmt.Errorf("services: %w", err)
-	}
-
-	fmt.Println("\n✅ Rice applied successfully!")
-	return nil
-}
-
-func (a *Applier) applyDotfiles() error {
-	fmt.Println("🔗 Linking dotfiles...")
-	for srcRel, destRel := range a.Manifest.Dotfiles {
-		src := filepath.Join(a.RicePath, "dotfiles", srcRel)
+	for _, destRel := range manifest.Dotfiles {
 		dest := expandPath(destRel)
-
-		if a.DryRun {
-			fmt.Printf("   [DRY RUN] %s → %s\n", src, dest)
+		if _, err := os.Lstat(dest); os.IsNotExist(err) {
 			continue
 		}
 
-		// Create parent directory
+		backupDest := filepath.Join(backupDir, destRel)
+		b.Files[destRel] = dest
+
+		if dryRun {
+			fmt.Printf("   [DRY RUN] Would backup: %s\n", dest)
+			continue
+		}
+
+		if err := os.MkdirAll(filepath.Dir(backupDest), 0755); err != nil {
+			return b, fmt.Errorf("mkdir for backup: %w", err)
+		}
+
+		if err := copyFile(dest, backupDest); err != nil {
+			return b, fmt.Errorf("backup %s: %w", dest, err)
+		}
+		fmt.Printf("   📦 Backed up: %s\n", dest)
+	}
+
+	if !dryRun {
+		fmt.Printf("   Backup location: %s\n", backupDir)
+	}
+	return b, nil
+}
+
+func applyDotfiles(ricePath string, manifest *Manifest, dryRun bool) error {
+	fmt.Println("\n🔗 Linking dotfiles...")
+
+	for srcRel, destRel := range manifest.Dotfiles {
+		src := filepath.Join(ricePath, "dotfiles", srcRel)
+		dest := expandPath(destRel)
+
+		if _, err := os.Stat(src); os.IsNotExist(err) {
+			return fmt.Errorf("source file not found: %s", src)
+		}
+
+		if dryRun {
+			fmt.Printf("   [DRY RUN] Would link: %s → %s\n", src, dest)
+			continue
+		}
+
 		if err := os.MkdirAll(filepath.Dir(dest), 0755); err != nil {
 			return fmt.Errorf("mkdir %s: %w", filepath.Dir(dest), err)
 		}
 
-		// Remove existing
 		if _, err := os.Lstat(dest); err == nil {
 			if err := os.Remove(dest); err != nil {
-				return fmt.Errorf("remove %s: %w", dest, err)
+				return fmt.Errorf("remove existing %s: %w", dest, err)
 			}
 		}
 
-		// Create symlink
 		if err := os.Symlink(src, dest); err != nil {
 			return fmt.Errorf("symlink %s → %s: %w", src, dest, err)
 		}
-		fmt.Printf("   %s → %s\n", src, dest)
+		fmt.Printf("   🔗 %s → %s\n", src, dest)
 	}
 	return nil
 }
 
-func (a *Applier) installPackages() error {
-	if len(a.Manifest.Dependencies.Pacman) == 0 {
+func installPackages(manifest *Manifest, dryRun bool) error {
+	if len(manifest.Dependencies.Pacman) == 0 {
 		return nil
 	}
 
-	fmt.Printf("📦 Installing packages: %s\n", strings.Join(a.Manifest.Dependencies.Pacman, ", "))
-	if a.DryRun {
+	fmt.Printf("\n📦 Installing packages: %s\n", strings.Join(manifest.Dependencies.Pacman, ", "))
+
+	if dryRun {
+		fmt.Println("   [DRY RUN] Would install packages")
 		return nil
 	}
 
-	args := append([]string{"pacman", "-S", "--needed", "--noconfirm"}, a.Manifest.Dependencies.Pacman...)
+	args := append([]string{"pacman", "-S", "--needed", "--noconfirm"}, manifest.Dependencies.Pacman...)
 	cmd := exec.Command("sudo", args...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
+	cmd.Stdin = os.Stdin
 	return cmd.Run()
 }
 
-func (a *Applier) restartServices() error {
-	for _, service := range a.Manifest.Services.Restart {
-		fmt.Printf("🔄 Restarting: %s\n", service)
-		if a.DryRun {
+func restartServices(manifest *Manifest, dryRun bool) error {
+	if len(manifest.Services.Restart) == 0 {
+		return nil
+	}
+
+	fmt.Println("\n🔄 Restarting services...")
+
+	for _, service := range manifest.Services.Restart {
+		if dryRun {
+			fmt.Printf("   [DRY RUN] Would restart: %s\n", service)
 			continue
 		}
+
+		fmt.Printf("   Restarting: %s\n", service)
 		cmd := exec.Command("systemctl", "--user", "restart", service)
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
@@ -110,6 +182,20 @@ func (a *Applier) restartServices() error {
 		}
 	}
 	return nil
+}
+
+func restoreBackup(b *Backup) {
+	fmt.Println("🔄 Restoring from backup...")
+	for destRel, dest := range b.Files {
+		backupFile := filepath.Join(b.Path, destRel)
+		if _, err := os.Stat(backupFile); os.IsNotExist(err) {
+			continue
+		}
+		os.Remove(dest)
+		copyFile(backupFile, dest)
+		fmt.Printf("   Restored: %s\n", dest)
+	}
+	fmt.Printf("✅ Backup restored from: %s\n", b.Path)
 }
 
 func expandPath(path string) string {

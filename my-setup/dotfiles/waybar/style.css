@@ -1,0 +1,136 @@
+/* Alternative pill-style theme (keeps existing style.css untouched) */
+@import "../../.cache/wal/colors-waybar.css";
+
+* {
+  font-family: "JetBrainsMono Nerd Font";
+  font-size: 12px;
+  font-weight: 500;
+  border: none;
+  min-height: 0;
+}
+
+window#waybar {
+  background: transparent;
+  color: @foreground;
+}
+
+.modules-center {
+  /* background: rgba(20, 20, 28, 0.34); */
+  background: @background;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 999px;
+  padding: 8px;
+}
+
+#workspaces,
+#custom-pacman,
+#custom-notification,
+#window,
+#custom-music,
+#clock,
+#pulseaudio,
+#backlight,
+#custom-memorypie,
+#bluetooth,
+#battery,
+#tray {
+  background: rgba(255, 255, 255, 0.14);
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-radius: 999px;
+  margin: 0 5px;
+  padding: 2px 11px;
+  color: @foreground;
+}
+
+#workspaces {
+  padding: 1px 8px;
+}
+
+#window {
+  padding: 2px 12px;
+}
+
+#custom-separator {
+  background: transparent;
+  color: rgba(255, 255, 255, 0.5);
+  margin: 0 2px;
+  padding: 0 2px;
+}
+
+#workspaces button {
+  background: transparent;
+  color: rgba(255, 255, 255, 0.42);
+  padding: 0 4px;
+  margin: 0;
+  border-radius: 999px;
+  border: none;
+  box-shadow: none;
+  outline: none;
+  transition: color 140ms ease;
+}
+
+#workspaces button.active {
+  background: transparent;
+  border: none;
+  color: white;
+  box-shadow: none;
+}
+
+#workspaces button:hover {
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  color: rgba(255, 255, 255, 0.6);
+}
+
+#tray {
+  padding: 2px 10px;
+}
+
+#tray > .item image {
+  min-width: 16px;
+  min-height: 16px;
+}
+
+#custom-music {
+  padding: 2px 12px;
+}
+
+#custom-notification {
+  padding-right: 14px;
+}
+
+#custom-music:hover,
+#custom-pacman:hover,
+#custom-notification:hover,
+#window:hover,
+#clock:hover,
+#pulseaudio:hover,
+#backlight:hover,
+#custom-memorypie:hover,
+#bluetooth:hover,
+#battery:hover,
+#tray:hover {
+  background: rgba(255, 255, 255, 0.2);
+  border-color: rgba(255, 255, 255, 0.3);
+}
+
+#backlight {
+  color: @foreground;
+  text-shadow: 0 0 3px rgba(255, 255, 255, 0.18);
+}
+
+#backlight:hover {
+  animation: sunPulse 1.8s ease-in-out infinite alternate;
+}
+
+@keyframes sunPulse {
+  0% {
+    color: @foreground;
+    text-shadow: 0 0 2px rgba(255, 255, 255, 0.12);
+  }
+  100% {
+    color: @foreground;
+    text-shadow: 0 0 8px rgba(255, 255, 255, 0.34);
+  }
+}

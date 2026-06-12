@@ -5,89 +5,79 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
 )
 
-type Generator struct {
-	OutputPath string
-	Name       string
-}
-
-func NewGenerator(outputPath, name string) *Generator {
-	return &Generator{
-		OutputPath: outputPath,
-		Name:       name,
-	}
-}
-
-// commonConfigs maps config file paths to their rice structure names
-var commonConfigs = map[string]string{
+var knownConfigs = map[string]string{
 	".config/hypr/hyprland.conf": "hypr/hyprland.conf",
 	".config/waybar/config":      "waybar/config",
 	".config/waybar/style.css":   "waybar/style.css",
 	".config/kitty/kitty.conf":   "kitty/kitty.conf",
 	".config/dunst/dunstrc":      "dunst/dunstrc",
 	".config/rofi/config.rasi":   "rofi/config.rasi",
+	".config/gtk-3.0/settings.ini": "gtk/settings.ini",
+	".config/wallpaper":           "wallpaper",
 }
 
-func (g *Generator) Generate() error {
-	fmt.Printf("🔍 Scanning for configs...\n")
+func Generate(outputPath, name, description string) error {
+	fmt.Printf("🔍 Generating rice: %s\n", name)
 
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return fmt.Errorf("can't find home dir: %w", err)
+		return fmt.Errorf("can't find home directory: %w", err)
 	}
 
 	manifest := &Manifest{
-		Name:        g.Name,
+		Name:        name,
 		Version:     "0.1.0",
-		Description: fmt.Sprintf("Auto-generated rice: %s", g.Name),
+		Description: description,
 		Dotfiles:    make(map[string]string),
 	}
 
-	// Create output directories
-	dotfilesPath := filepath.Join(g.OutputPath, "dotfiles")
-	for _, relPath := range commonConfigs {
-		if err := os.MkdirAll(filepath.Join(dotfilesPath, filepath.Dir(relPath)), 0755); err != nil {
-			return err
-		}
+	dotfilesDir := filepath.Join(outputPath, "dotfiles")
+	if err := os.MkdirAll(dotfilesDir, 0755); err != nil {
+		return fmt.Errorf("failed to create output directory: %w", err)
 	}
 
-	// Copy existing configs
-	for srcRel, destRel := range commonConfigs {
+	for srcRel, destRel := range knownConfigs {
 		src := filepath.Join(home, srcRel)
 		if _, err := os.Stat(src); os.IsNotExist(err) {
 			continue
 		}
 
-		dest := filepath.Join(dotfilesPath, destRel)
-		if err := copyFile(src, dest); err != nil {
-			return fmt.Errorf("copy %s: %w", srcRel, err)
+		dest := filepath.Join(dotfilesDir, destRel)
+		if err := os.MkdirAll(filepath.Dir(dest), 0755); err != nil {
+			return fmt.Errorf("failed to create directory for %s: %w", destRel, err)
 		}
+
+		if err := copyFile(src, dest); err != nil {
+			fmt.Printf("   ⚠ skipping %s: %v\n", srcRel, err)
+			continue
+		}
+
 		manifest.Dotfiles[destRel] = srcRel
 		fmt.Printf("   ✓ %s\n", srcRel)
 	}
 
-	// Detect installed packages that might be relevant
-	manifest.Dependencies.Pacman = detectRelevantPackages()
+	manifest.Dependencies.Pacman = detectInstalledPackages()
 
-	// Save manifest
-	if err := os.MkdirAll(g.OutputPath, 0755); err != nil {
-		return err
+	if err := manifest.Save(outputPath); err != nil {
+		return fmt.Errorf("failed to save manifest: %w", err)
 	}
 
-	return manifest.Save(g.OutputPath)
+	fmt.Printf("\n✅ Rice generated: %s/\n", outputPath)
+	return nil
 }
 
-func detectRelevantPackages() []string {
+func detectInstalledPackages() []string {
 	relevant := []string{
 		"hyprland", "waybar", "kitty", "dunst", "rofi",
 		"noto-fonts-emoji", "ttf-jetbrains-mono",
+		"ttf-nerd-fonts-symbols", "papirus-icon-theme",
 	}
 
 	var installed []string
 	for _, pkg := range relevant {
-		cmd := exec.Command("pacman", "-Q", pkg)
+		cmd := exec.Command("pacman", "-Qi", pkg)
 		if err := cmd.Run(); err == nil {
 			installed = append(installed, pkg)
 		}

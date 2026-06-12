@@ -3,28 +3,26 @@ package cmd
 import (
 	"fmt"
 
+	"github.com/amitc1612/ricebox/rice"
 	"github.com/spf13/cobra"
-	"github.com/yourusername/ricebox/rice"
+)
+
+var (
+	genDescription string
 )
 
 var generateCmd = &cobra.Command{
 	Use:   "generate [name]",
-	Short: "Generate a rice from current configs",
+	Short: "Generate a rice from your current configs",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		name := args[0]
 		output := fmt.Sprintf("./%s", name)
-
-		gen := rice.NewGenerator(output, name)
-		if err := gen.Generate(); err != nil {
-			return err
-		}
-
-		fmt.Printf("\n✅ Rice generated: %s/\n", output)
-		return nil
+		return rice.Generate(output, name, genDescription)
 	},
 }
 
 func init() {
+	generateCmd.Flags().StringVarP(&genDescription, "description", "d", "", "Description of the rice")
 	rootCmd.AddCommand(generateCmd)
 }

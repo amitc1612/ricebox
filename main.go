@@ -1,6 +1,6 @@
 package main
 
-import "github.com/yourusername/ricebox/cmd"
+import "github.com/amitc1612/ricebox/cmd"
 
 func main() {
 	cmd.Execute()

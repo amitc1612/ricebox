@@ -44,16 +44,36 @@ func LoadManifest(path string) (*Manifest, error) {
 		return nil, fmt.Errorf("failed to parse manifest: %w", err)
 	}
 
+	if m.Name == "" {
+		return nil, fmt.Errorf("rice.toml is missing required field: name")
+	}
+
 	return &m, nil
 }
 
 func (m *Manifest) Save(path string) error {
-	f, err := os.Create(filepath.Join(path, "rice.toml"))
+	manifestPath := filepath.Join(path, "rice.toml")
+	f, err := os.Create(manifestPath)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to create manifest: %w", err)
 	}
 	defer f.Close()
 
 	encoder := toml.NewEncoder(f)
 	return encoder.Encode(m)
+}
+
+func (m *Manifest) Validate() error {
+	if m.Name == "" {
+		return fmt.Errorf("name is required")
+	}
+	if m.Version == "" {
+		return fmt.Errorf("version is required")
+	}
+	for src, dest := range m.Dotfiles {
+		if src == "" || dest == "" {
+			return fmt.Errorf("dotfile entry has empty key or value: %s -> %s", src, dest)
+		}
+	}
+	return nil
 }
